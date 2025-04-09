@@ -16,4 +16,5 @@ video_crop.py
     parse the json file for crop / rotate parameters
     apply said modifiers to frames incoming on the websocket
 
+    treat edge case where crop section might be out of the frame bounds
     
