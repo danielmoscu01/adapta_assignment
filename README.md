@@ -18,3 +18,7 @@ video_crop.py
 
     treat edge case where crop section might be out of the frame bounds
     
+
+
+first run the server ( video_crop.py ) with "python video_crop.py --json rcrop_parameters.json"
+then the client (video_acquisition.py) with  python video_acquisition.py (if any other ip than localhost is used, add --ip 'ip_address')
