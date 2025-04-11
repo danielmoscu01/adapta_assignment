@@ -5,19 +5,19 @@ import struct
 import json
 import numpy as np
 
+
 def load_transform_params(json_path):
     # we open the json file and read the parameters from it
     with open(json_path, 'r') as f:
         params = json.load(f)
     
     return params
-
 def apply_transform(frame, transform_params):
-
-    # Get frame dimensions 0 = height, 1 = width
-    frame_height, frame_width = frame.shape[:2]
+    """Apply rotation and cropping with precise boundary checking."""
+    # Get frame dimensions
+    h, w = frame.shape[:2]
     
-    # Extract parameters from the json file and use some default values in case one is not given
+    # Extract parameters from JSON
     alpha = transform_params.get('alpha', 0)  # Rotation angle in degrees
     ox = transform_params.get('ox', 0.5)      # Normalized center x-coordinate
     oy = transform_params.get('oy', 0.5)      # Normalized center y-coordinate
@@ -25,50 +25,100 @@ def apply_transform(frame, transform_params):
     crop_height = transform_params.get('height', 1.0)  # Normalized height
     
     # Convert normalized coordinates to absolute pixel values
-    center_x = int(ox * frame_width)
-    center_y = int(oy * frame_height)
-    crop_w_pixels = int(crop_width * frame_width)
-    crop_h_pixels = int(crop_height * frame_height)
-
-    # Calculate the distance from center to any corner (half diagonal of the rectangle)
-    # This is the maximum possible extent of the crop after rotation
-    corner_radius = np.sqrt((crop_w_pixels/2)**2 + (crop_h_pixels/2)**2)
+    center_x = int(ox * w)
+    center_y = int(oy * h)
+    crop_w_pixels = int(crop_width * w)
+    crop_h_pixels = int(crop_height * h)
     
-    # Calculate the maximum safe radius (distance to closest frame edge)
-    max_safe_radius = min(center_x, center_y, frame_width - center_x, frame_height - center_y)
+    # Calculate the coordinates of the four corners of the crop rectangle (before rotation)
+    half_width = crop_w_pixels / 2
+    half_height = crop_h_pixels / 2
     
-    # Check if the crop might extend beyond frame boundaries when rotated
-    if corner_radius > max_safe_radius:
-        # Calculate scaling factor needed to fit within the safe radius
-        scale_factor = max_safe_radius / corner_radius
+    # Corners relative to center (top-left, top-right, bottom-right, bottom-left)
+    corners_rel = [
+        (-half_width, -half_height),
+        (half_width, -half_height),
+        (half_width, half_height),
+        (-half_width, half_height)
+    ]
+    
+    # Convert rotation angle to radians for calculation
+    angle_rad = np.radians(alpha)
+    cos_a = np.cos(angle_rad)
+    sin_a = np.sin(angle_rad)
+    
+    # Check if any corner would fall outside the frame after rotation
+    corners_rotated = []
+    outside_frame = False
+    
+    for dx, dy in corners_rel:
+        # Rotate the corner around center
+        # Rotation matrix: [cos(a) -sin(a); sin(a) cos(a)]
+        rotated_dx = dx * cos_a - dy * sin_a
+        rotated_dy = dx * sin_a + dy * cos_a
         
-        # Apply scaling to both dimensions to preserve aspect ratio
-        crop_w_pixels = int(crop_w_pixels * scale_factor)
-        crop_h_pixels = int(crop_h_pixels * scale_factor)
+        # Calculate absolute position
+        abs_x = center_x + rotated_dx
+        abs_y = center_y + rotated_dy
+        
+        corners_rotated.append((abs_x, abs_y))
+        
+        # Check if this corner is outside the frame
+        if abs_x < 0 or abs_x >= w or abs_y < 0 or abs_y >= h:
+            outside_frame = True
+    
+    # If any corner is outside, find the scaling factor needed
+    scale_factor = 1.0
+    
+    if outside_frame:
+        # Calculate how much each corner exceeds the frame
+        scale_factors = []
+        
+        for corner_x, corner_y in corners_rotated:
+            # Calculate how much this corner needs to be scaled
+            if corner_x < 0:
+                # Left boundary exceeded
+                scale_x = center_x / (center_x - corner_x)
+                scale_factors.append(scale_x)
+            elif corner_x >= w:
+                # Right boundary exceeded
+                scale_x = (w - center_x) / (corner_x - center_x)
+                scale_factors.append(scale_x)
+                
+            if corner_y < 0:
+                # Top boundary exceeded
+                scale_y = center_y / (center_y - corner_y)
+                scale_factors.append(scale_y)
+            elif corner_y >= h:
+                # Bottom boundary exceeded
+                scale_y = (h - center_y) / (corner_y - center_y)
+                scale_factors.append(scale_y)
+        
+        # Use the smallest scale factor to ensure all corners are inside
+        if scale_factors:
+            scale_factor = min(scale_factors)
+            
+            # Apply scaling to the crop dimensions
+            crop_w_pixels = int(crop_w_pixels * scale_factor)
+            crop_h_pixels = int(crop_h_pixels * scale_factor)
+  
     # Apply rotation to the frame
-    rotation_matrix = cv2.getRotationMatrix2D((center_x, center_y), -alpha, 1)
-    rotated_frame = cv2.warpAffine(
-        frame, 
-        rotation_matrix, 
-        (frame_width, frame_height),
-        borderMode=cv2.BORDER_REPLICATE  # This prevents black corners in the rotated image
-    )
+    rotation_matrix = cv2.getRotationMatrix2D((center_x, center_y), alpha, 1)
+    rotated_frame = cv2.warpAffine(frame, rotation_matrix, (w, h))
     
     # Calculate the final crop coordinates based on center and dimensions
     half_width = crop_w_pixels // 2
     half_height = crop_h_pixels // 2
     
-    x1 = max(0, center_x - half_width)  # Protect against edge cases
+    x1 = max(0, center_x - half_width)
     y1 = max(0, center_y - half_height)
-    x2 = min(frame_width, center_x + half_width)
-    y2 = min(frame_height, center_y + half_height)
+    x2 = min(w, center_x + half_width)
+    y2 = min(h, center_y + half_height)
     
     # Apply cropping to the rotated frame
     cropped_frame = rotated_frame[y1:y2, x1:x2]
     
     return cropped_frame
-
-
 
 
 def start_video_receiver(transform_json_path, host_ip='0.0.0.0', port=9999):
@@ -132,7 +182,7 @@ def start_video_receiver(transform_json_path, host_ip='0.0.0.0', port=9999):
     except KeyboardInterrupt:
         print("Stopping video receiver")
     finally:
-        # Clean up
+        # Clean up used resources
         client_socket.close()
         server_socket.close()
         cv2.destroyAllWindows()

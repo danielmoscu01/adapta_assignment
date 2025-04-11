@@ -21,4 +21,5 @@ video_crop.py
 
 
 first run the server ( video_crop.py ) with "python video_crop.py --json rcrop_parameters.json"
-then the client (video_acquisition.py) with  python video_acquisition.py (if any other ip than localhost is used, add --ip 'ip_address')
+
+then the client (video_acquisition.py) with  "python video_acquisition.py" (if any other ip than localhost is used, add --ip 'ip_address')
