@@ -5,17 +5,19 @@ import struct
 import json
 import numpy as np
 
-
 def load_transform_params(json_path):
     # we open the json file and read the parameters from it
     with open(json_path, 'r') as f:
         params = json.load(f)
     
     return params
+
+
 def apply_transform(frame, transform_params):
     """Apply rotation and cropping with precise boundary checking."""
+
     # Get frame dimensions
-    h, w = frame.shape[:2]
+    frame_height, frame_width = frame.shape[:2]
     
     # Extract parameters from JSON
     alpha = transform_params.get('alpha', 0)  # Rotation angle in degrees
@@ -25,15 +27,15 @@ def apply_transform(frame, transform_params):
     crop_height = transform_params.get('height', 1.0)  # Normalized height
     
     # Convert normalized coordinates to absolute pixel values
-    center_x = int(ox * w)
-    center_y = int(oy * h)
-    crop_w_pixels = int(crop_width * w)
-    crop_h_pixels = int(crop_height * h)
-    
+    center_x = int(ox * frame_width)
+    center_y = int(oy * frame_height)
+    crop_w_pixels = int(crop_width * frame_width)
+    crop_h_pixels = int(crop_height * frame_height)
+   
     # Calculate the coordinates of the four corners of the crop rectangle (before rotation)
     half_width = crop_w_pixels / 2
     half_height = crop_h_pixels / 2
-    
+  
     # Corners relative to center (top-left, top-right, bottom-right, bottom-left)
     corners_rel = [
         (-half_width, -half_height),
@@ -41,7 +43,7 @@ def apply_transform(frame, transform_params):
         (half_width, half_height),
         (-half_width, half_height)
     ]
-    
+ 
     # Convert rotation angle to radians for calculation
     angle_rad = np.radians(alpha)
     cos_a = np.cos(angle_rad)
@@ -64,7 +66,7 @@ def apply_transform(frame, transform_params):
         corners_rotated.append((abs_x, abs_y))
         
         # Check if this corner is outside the frame
-        if abs_x < 0 or abs_x >= w or abs_y < 0 or abs_y >= h:
+        if abs_x < 0 or abs_x >= frame_width or abs_y < 0 or abs_y >= frame_height:
             outside_frame = True
     
     # If any corner is outside, find the scaling factor needed
@@ -80,18 +82,18 @@ def apply_transform(frame, transform_params):
                 # Left boundary exceeded
                 scale_x = center_x / (center_x - corner_x)
                 scale_factors.append(scale_x)
-            elif corner_x >= w:
+            elif corner_x >= frame_width:
                 # Right boundary exceeded
-                scale_x = (w - center_x) / (corner_x - center_x)
+                scale_x = (frame_width - center_x) / (corner_x - center_x)
                 scale_factors.append(scale_x)
                 
             if corner_y < 0:
                 # Top boundary exceeded
                 scale_y = center_y / (center_y - corner_y)
                 scale_factors.append(scale_y)
-            elif corner_y >= h:
+            elif corner_y >= frame_height:
                 # Bottom boundary exceeded
-                scale_y = (h - center_y) / (corner_y - center_y)
+                scale_y = (frame_height - center_y) / (corner_y - center_y)
                 scale_factors.append(scale_y)
         
         # Use the smallest scale factor to ensure all corners are inside
@@ -104,7 +106,7 @@ def apply_transform(frame, transform_params):
   
     # Apply rotation to the frame
     rotation_matrix = cv2.getRotationMatrix2D((center_x, center_y), alpha, 1)
-    rotated_frame = cv2.warpAffine(frame, rotation_matrix, (w, h))
+    rotated_frame = cv2.warpAffine(frame, rotation_matrix, (frame_width, frame_height))
     
     # Calculate the final crop coordinates based on center and dimensions
     half_width = crop_w_pixels // 2
@@ -112,8 +114,8 @@ def apply_transform(frame, transform_params):
     
     x1 = max(0, center_x - half_width)
     y1 = max(0, center_y - half_height)
-    x2 = min(w, center_x + half_width)
-    y2 = min(h, center_y + half_height)
+    x2 = min(frame_width, center_x + half_width)
+    y2 = min(frame_height, center_y + half_height)
     
     # Apply cropping to the rotated frame
     cropped_frame = rotated_frame[y1:y2, x1:x2]
@@ -122,6 +124,7 @@ def apply_transform(frame, transform_params):
 
 
 def start_video_receiver(transform_json_path, host_ip='0.0.0.0', port=9999):
+    """Start a video receiver that listens for frames and applies transformations."""
     # Load transformation parameters
     transform_params = load_transform_params(transform_json_path)
     
@@ -187,6 +190,7 @@ def start_video_receiver(transform_json_path, host_ip='0.0.0.0', port=9999):
         server_socket.close()
         cv2.destroyAllWindows()
         print("Resources released")
+
 
 if __name__ == "__main__":
     import argparse
